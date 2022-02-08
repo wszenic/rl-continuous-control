@@ -1,4 +1,6 @@
-# implementation takien from: https://keras.io/examples/rl/ddpg_pendulum/
+# implementation taken from: https://keras.io/examples/rl/ddpg_pendulum/
+import numpy as np
+
 
 class OUActionNoise:
     def __init__(self, mean, std_deviation, theta=0.15, dt=1e-2, x_initial=None):

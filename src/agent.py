@@ -1,13 +1,15 @@
+import random
 from collections import namedtuple
 
 import numpy as np
-import random
 import torch
 
-from src.config import UPDATE_INTERVAL, BATCH_SIZE, BUFFER_SIZE, GAMMA, TAU, LEARNING_RATE, CHECKPOINT_SAVE_PATH
+from src.config import UPDATE_INTERVAL, BATCH_SIZE, BUFFER_SIZE, GAMMA, TAU, CHECKPOINT_SAVE_PATH, \
+    NOISE_STD, ACTOR_LEARNING_RATE, CRITIC_LEARNING_RATE
 from src.memory import ReplayBuffer
 from src.network import ActorNet
 from src.network import CriticNet
+from src.noise import OUActionNoise
 
 
 class Agent:
@@ -17,21 +19,25 @@ class Agent:
         self.state_size = state_size
         self.action_size = action_size
 
+        self.noise = OUActionNoise(mean=np.zeros(action_size), std_deviation=float(NOISE_STD) * np.ones(action_size))
+
         device = torch.device("cuda:0" if torch.cuda.is_available() else 'cpu')
 
         self.actor_network_local = ActorNet(state_size, action_size).to(device)
         self.actor_network_target = ActorNet(state_size, action_size).to(device)
+        self.actor_network_target.load_state_dict(self.actor_network_local.state_dict())
 
         self.critic_network_local = CriticNet(state_size, action_size).to(device)
         self.critic_network_target = CriticNet(state_size, action_size).to(device)
+        self.critic_network_target.load_state_dict(self.critic_network_local.state_dict())
 
         if read_saved_model:
             saved_model = torch.load(CHECKPOINT_SAVE_PATH)
             self.actor_network_local.load_state_dict(saved_model)
             self.critic_network_local.load_state_dict(saved_model)
 
-        self.actor_optimizer = torch.optim.Adam(self.actor_network_local.parameters(), lr=LEARNING_RATE)
-        self.critic_optimizer = torch.optim.Adam(self.critic_network_local.parameters(), lr=LEARNING_RATE)
+        self.actor_optimizer = torch.optim.Adam(self.actor_network_local.parameters(), lr=ACTOR_LEARNING_RATE)
+        self.critic_optimizer = torch.optim.Adam(self.critic_network_local.parameters(), lr=CRITIC_LEARNING_RATE)
 
         self.gamma = GAMMA
         self.tau = TAU
@@ -56,9 +62,9 @@ class Agent:
 
                 self.learn(self.env_feedback(*experience_replay))
 
-    def act(self, state, eps):
+    def act(self, state):
         state = torch.from_numpy(state).float().unsqueeze(0)
-        action_values = self.__get_state_action_values(state)
+        action_values = torch.clip(self.__get_state_action_values(state) + self.noise(), -1, 1)
         return action_values
 
     def learn(self, env_data):
@@ -69,10 +75,12 @@ class Agent:
 
         # critic
         critic_value = self.critic_network_local(env_data.state, env_data.action)
-        critic_loss = torch.mean(torch.square(y - critic_value))
+        # critic_loss = torch.mean(torch.square(y - critic_value))
+        critic_loss = torch.nn.functional.mse_loss(y, critic_value)
 
         self.critic_optimizer.zero_grad()
         critic_loss.backward()
+        torch.nn.utils.clip_grad_norm(self.critic_network_local.parameters(), 1)
         self.critic_optimizer.step()
 
         self.__soft_update(self.critic_network_local, self.critic_network_target)
