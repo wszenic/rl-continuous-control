@@ -37,7 +37,8 @@ class Agent:
             self.critic_network_local.load_state_dict(saved_model)
 
         self.actor_optimizer = torch.optim.Adam(self.actor_network_local.parameters(), lr=ACTOR_LEARNING_RATE)
-        self.critic_optimizer = torch.optim.Adam(self.critic_network_local.parameters(), lr=CRITIC_LEARNING_RATE)
+        self.critic_optimizer = torch.optim.Adam(self.critic_network_local.parameters(), lr=CRITIC_LEARNING_RATE,
+                                                 weight_decay=1e-2)
 
         self.gamma = GAMMA
         self.tau = TAU
@@ -75,12 +76,11 @@ class Agent:
 
         # critic
         critic_value = self.critic_network_local(env_data.state, env_data.action)
-        # critic_loss = torch.mean(torch.square(y - critic_value))
         critic_loss = torch.nn.functional.mse_loss(y, critic_value)
 
         self.critic_optimizer.zero_grad()
         critic_loss.backward()
-        torch.nn.utils.clip_grad_norm(self.critic_network_local.parameters(), 1)
+        torch.nn.utils.clip_grad_norm_(self.critic_network_local.parameters(), 1)
         self.critic_optimizer.step()
 
         self.__soft_update(self.critic_network_local, self.critic_network_target)

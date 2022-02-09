@@ -38,42 +38,26 @@ class CriticNet(nn.Module):
     def __init__(self, state_size: int, action_size: int):
         super().__init__()
 
-        # state block
-        self.bn_1 = nn.BatchNorm1d(state_size)
-        self.state_lin_1 = nn.Linear(state_size, CRITIC_STATE_1)
-        self.bn_2 = nn.BatchNorm1d(CRITIC_STATE_1)
-        self.state_relu_1 = nn.ReLU()
-        self.state_lin_2 = nn.Linear(CRITIC_STATE_1, CRITIC_STATE_2)
-        self.bn_3 = nn.BatchNorm1d(CRITIC_STATE_2)
-        self.state_relu_2 = nn.ReLU()
-
-        # action block
-        self.action_lin_1 = nn.Linear(action_size, CRITIC_ACTION_1)
-
-        # post-concatenation blocks
-        self.concat_lin_1 = nn.Linear(CRITIC_ACTION_1 + CRITIC_STATE_2, CRITIC_CONCAT_1)
+        self.bn_1 = nn.BatchNorm1d(state_size + action_size)
+        self.concat_lin_1 = nn.Linear(state_size + action_size, CRITIC_CONCAT_1)
+        self.bn_2 = nn.BatchNorm1d(CRITIC_CONCAT_1)
         self.concat_relu_1 = nn.ReLU()
         self.concat_lin_2 = nn.Linear(CRITIC_CONCAT_1, CRITIC_CONCAT_2)
+        self.bn_3 = nn.BatchNorm1d(CRITIC_CONCAT_2)
         self.concat_relu_2 = nn.ReLU()
         self.concat_lin_3 = nn.Linear(CRITIC_CONCAT_2, 1)
 
     def forward(self, state, action):
-        state = self.bn_1(state)
-        state = self.state_lin_1(state)
-        state = self.bn_2(state)
-        state = self.state_relu_1(state)
-        state = self.state_lin_2(state)
-        state = self.bn_3(state)
-        state = self.state_relu_2(state)
-
-        action = self.action_lin_1(action.float())
-
         concat = torch.cat([state, action], dim=1)
 
+        concat = self.bn_1(concat)
         concat = self.concat_lin_1(concat)
+        concat = self.bn_2(concat)
         concat = self.concat_relu_1(concat)
         concat = self.concat_lin_2(concat)
+        concat = self.bn_3(concat)
         concat = self.concat_relu_2(concat)
         concat = self.concat_lin_3(concat)
 
         return concat
+
