@@ -4,7 +4,7 @@ from collections import namedtuple
 import numpy as np
 import torch
 
-from src.config import UPDATE_INTERVAL, BATCH_SIZE, BUFFER_SIZE, GAMMA, TAU, CHECKPOINT_SAVE_PATH, \
+from src.config import BATCH_SIZE, BUFFER_SIZE, GAMMA, TAU, CHECKPOINT_SAVE_PATH, \
     NOISE_STD, ACTOR_LEARNING_RATE, CRITIC_LEARNING_RATE
 from src.memory import ReplayBuffer
 from src.network import ActorNet
@@ -34,11 +34,11 @@ class Agent:
         if read_saved_model:
             saved_model = torch.load(CHECKPOINT_SAVE_PATH)
             self.actor_network_local.load_state_dict(saved_model)
-            self.critic_network_local.load_state_dict(saved_model)
+            # self.critic_network_local.load_state_dict(saved_model)
 
         self.actor_optimizer = torch.optim.Adam(self.actor_network_local.parameters(), lr=ACTOR_LEARNING_RATE)
         self.critic_optimizer = torch.optim.Adam(self.critic_network_local.parameters(), lr=CRITIC_LEARNING_RATE,
-                                                 weight_decay=1e-2)
+                                                 weight_decay=0)
 
         self.gamma = GAMMA
         self.tau = TAU
@@ -56,23 +56,24 @@ class Agent:
             done=env_data.done,
         )
 
-        self._step = (self._step + 1) % UPDATE_INTERVAL
-        if self._step == 0:
-            if len(self.memory) > BATCH_SIZE:
-                experience_replay = self.memory.sample()
+        if len(self.memory) > BATCH_SIZE:
+            experience_replay = self.memory.sample()
 
-                self.learn(self.env_feedback(*experience_replay))
+            self.learn(self.env_feedback(*experience_replay))
 
     def act(self, state):
         state = torch.from_numpy(state).float().unsqueeze(0)
-        action_values = torch.clip(self.__get_state_action_values(state) + self.noise(), -1, 1)
+        action_values = torch.clip(self.__get_state_action_values(state) + self.noise(), -1, 1).numpy()
         return action_values
+
+    def reset(self):
+        self.noise.reset()
 
     def learn(self, env_data):
         target_actions = self.actor_network_target(env_data.next_state)
         y = env_data.reward + GAMMA * self.critic_network_target(
             env_data.next_state, target_actions
-        )
+        ) * (1 - env_data.done)
 
         # critic
         critic_value = self.critic_network_local(env_data.state, env_data.action)
@@ -103,12 +104,6 @@ class Agent:
         self.actor_network_local.train()
 
         return actions_values
-
-    def __get_epsilon_greedy_action(self, action_values, eps):
-        if random.random() > eps:
-            return np.argmax(action_values.cpu().data.numpy())
-        else:
-            return random.choice(np.arange(self.action_size))
 
     def __soft_update(self, local_model, target_model):
         for target_param, local_param in zip(target_model.parameters(), local_model.parameters()):

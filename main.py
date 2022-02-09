@@ -5,10 +5,12 @@ import numpy as np
 import os
 import torch
 from unityagents import UnityEnvironment
+import time
 
 from src.agent import Agent
 from src.config import MAX_EPOCH, CHECKPOINT_SAVE_PATH, GAMMA, TAU, BATCH_SIZE, ACTOR_LEARNING_RATE, \
-    CRITIC_LEARNING_RATE
+    CRITIC_LEARNING_RATE, CHECKPOINT_EVERY, ACTOR_SIZE_1, CRITIC_SIZE_2, CRITIC_SIZE_1, ACTOR_SIZE_2, \
+    UNITY_ENV_LOCATION
 from src.structs import env_feedback
 
 
@@ -26,20 +28,29 @@ def run():
 )
 def train(log: bool):
     env, agent, scores, brain_name = setup_environment()
-
+    best_average = 0
     if log:
         neptune_log = log_to_neptune()
 
     for episode in range(MAX_EPOCH):
+        episode_start_time = time.time()
         env_info = env.reset(train_mode=True)[brain_name]
+        agent.reset()
         start_state = env_info.vector_observations[0]
         score = act_during_episode(agent, env, start_state, brain_name)
 
         if log:
+            best_average = max(best_average, np.mean(scores[-100:]))
+            neptune_log['best_average'].log(best_average)
             neptune_log['score'].log(score)
         scores.append(score)
+        episode_time = time.time() - episode_start_time
         print(
-            f"Episode {episode} | Score = {score:.2f} | Max score = {np.max(scores):.2f} | Avg = {np.mean(scores[-100:]):.2f}")
+            f"Ep: {episode} | Score: {score:.2f} | Max: {np.max(scores):.2f} "
+            f"| Avg: {np.mean(scores[-100:]):.2f} | Time: {episode_time:.0f}")
+
+        if episode % CHECKPOINT_EVERY == 0:
+            torch.save(agent.actor_network_local.state_dict(), CHECKPOINT_SAVE_PATH)
 
     if log:
         neptune_log.stop()
@@ -50,19 +61,18 @@ def train(log: bool):
 @run.command("evaluate", short_help="Run the agent based on saved weights")
 def evaluate():
     logging.info("Setting up the environment for evaluation")
-    env, agent, _, brain_name = setup_environment(read_saved_model=True)
+    env, agent, _, brain_name = setup_environment(read_saved_model=True, no_graphics=False)
 
     env_info = env.reset(train_mode=False)[brain_name]
     start_state = env_info.vector_observations[0]
 
-    score = act_during_episode(agent, env, start_state, brain_name, EPS_MIN)
+    score = act_during_episode(agent, env, start_state, brain_name)
     print(f"Evaluation score = {score}")
     env.close()
 
 
-def setup_environment(read_saved_model=False):
-    env = UnityEnvironment(
-        file_name="/Users/wojciech.szenic/PycharmProjects/rl-continuous-control/unity_env_single/Reacher.app")
+def setup_environment(read_saved_model=False, no_graphics=True):
+    env = UnityEnvironment(file_name=UNITY_ENV_LOCATION, no_graphics=no_graphics)
 
     brain_name = env.brain_names[0]
     brain = env.brains[brain_name]
@@ -82,7 +92,6 @@ def act_during_episode(agent, env, state, brain_name):
     score = 0
     while True:
         action = agent.act(state)
-        action = np.clip(action.numpy(), -1, 1)
         env_info = env.step(action)[brain_name]
         env_response = env_feedback(state, action, env_info.rewards[0], env_info.vector_observations[0],
                                     env_info.local_done[0])
@@ -106,7 +115,11 @@ def log_to_neptune():
         'CRITIC_LEARNING_RATE': CRITIC_LEARNING_RATE,
         'GAMMA': GAMMA,
         'TAU': TAU,
-        'BATCH_SIZE': BATCH_SIZE
+        'BATCH_SIZE': BATCH_SIZE,
+        'ACTOR_MID_1': ACTOR_SIZE_1,
+        'ACTOR_MID_2': ACTOR_SIZE_2,
+        'CRITIC_CONCAT_1': CRITIC_SIZE_1,
+        'CRITIC_CONCAT_2': CRITIC_SIZE_2
     }
     return neptune_run
 
