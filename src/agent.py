@@ -61,10 +61,12 @@ class Agent:
 
             self.learn(self.env_feedback(*experience_replay))
 
-    def act(self, state):
+    def act(self, state, use_noise):
         state = torch.from_numpy(state).float().unsqueeze(0)
-        action_values = torch.clip(self.__get_state_action_values(state) + self.noise(), -1, 1).numpy()
-        return action_values
+        if use_noise:
+            return torch.clip(self.__get_state_action_values(state) + self.noise(), -1, 1).numpy()
+        else:
+            return torch.clip(self.__get_state_action_values(state), -1, 1).numpy()
 
     def reset(self):
         self.noise.reset()

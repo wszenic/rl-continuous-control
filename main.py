@@ -10,13 +10,26 @@ import time
 from src.agent import Agent
 from src.config import MAX_EPOCH, CHECKPOINT_SAVE_PATH, GAMMA, TAU, BATCH_SIZE, ACTOR_LEARNING_RATE, \
     CRITIC_LEARNING_RATE, CHECKPOINT_EVERY, ACTOR_SIZE_1, CRITIC_SIZE_2, CRITIC_SIZE_1, ACTOR_SIZE_2, \
-    UNITY_ENV_LOCATION
+    UNITY_ENV_LOCATION, EPOCHS_WITH_NOISE
 from src.structs import env_feedback
 
 
 @click.group(chain=True, invoke_without_command=True)
 def run():
     logging.info("Running the ml-monitoring project")
+
+
+@run.command("evaluate", short_help="Run the agent based on saved weights")
+def evaluate():
+    logging.info("Setting up the environment for evaluation")
+    env, agent, _, brain_name = setup_environment(read_saved_model=True, no_graphics=False)
+
+    env_info = env.reset(train_mode=False)[brain_name]
+    start_state = env_info.vector_observations[0]
+
+    score = act_during_episode(agent, env, start_state, brain_name, use_noise=False)
+    print(f"Evaluation score = {score}")
+    env.close()
 
 
 @run.command("train", short_help="Train the reinforcement learning model")
@@ -29,15 +42,18 @@ def run():
 def train(log: bool):
     env, agent, scores, brain_name = setup_environment()
     best_average = 0
+    use_noise = True
     if log:
         neptune_log = log_to_neptune()
 
     for episode in range(MAX_EPOCH):
+        if episode > EPOCHS_WITH_NOISE:
+            use_noise = False
         episode_start_time = time.time()
         env_info = env.reset(train_mode=True)[brain_name]
         agent.reset()
         start_state = env_info.vector_observations[0]
-        score = act_during_episode(agent, env, start_state, brain_name)
+        score = act_during_episode(agent, env, start_state, brain_name, use_noise)
 
         if log:
             best_average = max(best_average, np.mean(scores[-100:]))
@@ -58,19 +74,6 @@ def train(log: bool):
     env.close()
 
 
-@run.command("evaluate", short_help="Run the agent based on saved weights")
-def evaluate():
-    logging.info("Setting up the environment for evaluation")
-    env, agent, _, brain_name = setup_environment(read_saved_model=True, no_graphics=False)
-
-    env_info = env.reset(train_mode=False)[brain_name]
-    start_state = env_info.vector_observations[0]
-
-    score = act_during_episode(agent, env, start_state, brain_name)
-    print(f"Evaluation score = {score}")
-    env.close()
-
-
 def setup_environment(read_saved_model=False, no_graphics=True):
     env = UnityEnvironment(file_name=UNITY_ENV_LOCATION, no_graphics=no_graphics)
 
@@ -88,10 +91,10 @@ def setup_environment(read_saved_model=False, no_graphics=True):
     return env, agent, scores, brain_name
 
 
-def act_during_episode(agent, env, state, brain_name):
+def act_during_episode(agent, env, state, brain_name, use_noise):
     score = 0
     while True:
-        action = agent.act(state)
+        action = agent.act(state, use_noise)
         env_info = env.step(action)[brain_name]
         env_response = env_feedback(state, action, env_info.rewards[0], env_info.vector_observations[0],
                                     env_info.local_done[0])
@@ -119,7 +122,8 @@ def log_to_neptune():
         'ACTOR_MID_1': ACTOR_SIZE_1,
         'ACTOR_MID_2': ACTOR_SIZE_2,
         'CRITIC_CONCAT_1': CRITIC_SIZE_1,
-        'CRITIC_CONCAT_2': CRITIC_SIZE_2
+        'CRITIC_CONCAT_2': CRITIC_SIZE_2,
+        'EPOCHS_WITH_NOISE': EPOCHS_WITH_NOISE
     }
     return neptune_run
 
